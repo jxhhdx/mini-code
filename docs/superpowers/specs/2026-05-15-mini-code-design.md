@@ -1,86 +1,86 @@
-# mini-code Design Spec
+# mini-code 设计文档
 
-## Overview
+## 概述
 
-mini-code is a Rust-based AI coding assistant CLI inspired by Claude Code. It provides a REPL interface where users can have multi-turn conversations with Anthropic's Claude models, with the model able to invoke tools to read files, edit code, execute shell commands, and explore the filesystem.
+mini-code 是一个受 Claude Code 启发的、基于 Rust 的 AI 编码助手 CLI。它提供一个 REPL 交互界面，用户可以与 Anthropic 的 Claude 模型进行多轮对话，模型可以调用工具来读取文件、编辑代码、执行 shell 命令和浏览文件系统。
 
-## Goals
+## 目标
 
-- Provide a lightweight, fast alternative to Claude Code for core coding workflows
-- Support multi-session conversation management
-- Enable safe, user-confirmed file and shell operations via Tool Use
-- Be simple to build, understand, and extend
+- 为核心编码工作流提供一个轻量、快速的 Claude Code 替代品
+- 支持多会话对话管理
+- 通过 Tool Use 实现安全的、经用户确认的文件和 shell 操作
+- 易于构建、理解和扩展
 
-## Non-Goals
+## 非目标
 
-- Full parity with Claude Code (no MCP servers, no IDE integration, no image input)
-- Support for multiple AI providers (Anthropic only, for now)
-- Web UI or TUI interface (plain terminal REPL only)
+- 与 Claude Code 完全对等（不支持 MCP 服务器、IDE 集成、图片输入）
+- 支持多个 AI 提供商（目前仅 Anthropic）
+- Web UI 或 TUI 界面（仅终端 REPL）
 
-## Architecture
+## 架构
 
-Single crate with layered modules:
+单 crate，分层模块：
 
 ```
 src/
-├── main.rs            # CLI entry: parse args, load config, start REPL
-├── config.rs          # Config struct + read/write ~/.mini-code/config.toml
-├── session.rs         # Session management: create/switch/list/delete, persist to ~/.mini-code/sessions/
-├── anthropic.rs       # API client: wrap Messages API, handle tool use loop
-├── repl.rs            # Interaction loop: read user input, render assistant response, handle slash commands
+├── main.rs            # CLI 入口：解析参数、加载配置、启动 REPL
+├── config.rs          # 配置结构体 + 读写 ~/.mini-code/config.toml
+├── session.rs         # 会话管理：创建/切换/列出/删除，持久化到 ~/.mini-code/sessions/
+├── anthropic.rs       # API 客户端：封装 Messages API，处理 tool use 循环
+├── repl.rs            # 交互循环：读取用户输入，渲染助手回复，处理 slash 命令
 ├── tools/
-│   ├── mod.rs         # Tool registry, dispatcher
+│   ├── mod.rs         # 工具注册表、调度器
 │   ├── read_file.rs
 │   ├── write_file.rs
 │   ├── search_replace.rs
 │   ├── bash.rs
 │   └── list_dir.rs
-└── message_history.rs # Message serialization/deserialization (for session persistence)
+└── message_history.rs # 消息序列化/反序列化（用于会话持久化）
 ```
 
-### Execution Flow
+### 执行流程
 
-1. `main.rs` loads config, initializes `SessionManager`
-2. Starts `Repl`, enters read-eval-print loop
-3. User input -> appended to current session message history -> call `AnthropicClient`
-4. API returns content or `tool_use` block -> if tool_use, `tools::execute()` runs it
-5. Tool result sent back to API -> loop until model outputs final text response
-6. Auto-save session after each conversation turn
+1. `main.rs` 加载配置，初始化 `SessionManager`
+2. 启动 `Repl`，进入读取-评估-打印循环
+3. 用户输入 → 追加到当前会话消息历史 → 调用 `AnthropicClient`
+4. API 返回内容或 `tool_use` 块 → 若是 tool_use，`tools::execute()` 执行它
+5. 工具结果回传给 API → 循环直到模型输出最终文本回复
+6. 每轮对话后自动保存会话
 
-## Tool Use Design
+## Tool Use 设计
 
-Anthropic Tool Use interaction pattern:
-1. User message + available tools list -> API
-2. API may return `tool_use` block (model wants to execute tool)
-3. Program executes tool, returns result as `tool_result` block
-4. API may return another `tool_use`, or final text response
+Anthropic Tool Use 交互模式：
+1. 用户消息 + 可用工具列表 → API
+2. API 可能返回 `tool_use` 块（模型想要执行工具）
+3. 程序执行工具，将结果作为 `tool_result` 块回传
+4. API 可能再次返回 `tool_use`，或输出最终文本回复
 
-### Supported Tools
+### 支持的工具
 
-| Tool Name | Function | Parameters |
-|-----------|----------|------------|
-| `read_file` | Read file content | `path: string` |
-| `write_file` | Write complete file (overwrite) | `path: string, content: string` |
-| `search_replace` | Incremental edit | `path: string, old_string: string, new_string: string` |
-| `bash` | Execute shell command | `command: string, timeout?: number` |
-| `list_dir` | List directory contents | `path: string` |
+| 工具名 | 功能 | 参数 |
+|--------|------|------|
+| `read_file` | 读取文件内容 | `path: string` |
+| `write_file` | 写入完整文件（覆盖） | `path: string, content: string` |
+| `search_replace` | 增量编辑 | `path: string, old_string: string, new_string: string` |
+| `bash` | 执行 shell 命令 | `command: string, timeout?: number` |
+| `list_dir` | 列出目录内容 | `path: string` |
 
-### Safety Rules
+### 安全规则
 
-- `bash` commands require user confirmation (Y/n) before execution
-- `write_file` overwriting an existing file requires user confirmation
-- `search_replace` requires exact `old_string` match; if not found, return error to model for retry
-- Each tool returns structured JSON result with `success: bool` and `output`/`error` fields
+- `bash` 命令执行前需要用户确认（Y/n）
+- `write_file` 覆盖已有文件前需要用户确认
+- `search_replace` 要求 `old_string` 完全匹配；未找到时返回错误给模型重试
+- 每个工具返回结构化 JSON 结果，包含 `success: bool` 和 `output`/`error` 字段
 
-### Code Editing Flow
+### 代码编辑流程
 
-- Model prefers `search_replace` for modifying existing files
-- `write_file` is used only for creating new files
-- If `search_replace` fails (old_string not found), error is returned to model, which typically corrects and retries
+- 模型优先使用 `search_replace` 修改现有文件
+- 仅创建新文件时使用 `write_file`
+- 如果 `search_replace` 失败（old_string 未找到），错误返回给模型，模型通常会修正后重试
 
-## Session Management
+## 会话管理
 
-Each session is an independent message history stored at `~/.mini-code/sessions/<id>.json`:
+每个会话是一个独立的消息历史，存储在 `~/.mini-code/sessions/<id>.json`：
 
 ```json
 {
@@ -95,23 +95,23 @@ Each session is an independent message history stored at `~/.mini-code/sessions/
 }
 ```
 
-### REPL Slash Commands
+### REPL Slash 命令
 
-| Command | Function |
-|---------|----------|
-| `/new <name>` | Create new session and switch to it |
-| `/sessions` | List all sessions |
-| `/switch <id>` | Switch to specified session |
-| `/rename <name>` | Rename current session |
-| `/delete <id>` | Delete a session |
-| `/clear` | Clear current session messages (keep session) |
-| `/config` | View/edit config |
-| `/help` | Show help |
-| `/exit` | Exit |
+| 命令 | 功能 |
+|------|------|
+| `/new <name>` | 创建新会话并切换 |
+| `/sessions` | 列出所有会话 |
+| `/switch <id>` | 切换到指定会话 |
+| `/rename <name>` | 重命名当前会话 |
+| `/delete <id>` | 删除会话 |
+| `/clear` | 清空当前会话消息（保留会话）|
+| `/config` | 查看/编辑配置 |
+| `/help` | 显示帮助 |
+| `/exit` | 退出 |
 
-## Configuration
+## 配置
 
-Stored at `~/.mini-code/config.toml`:
+存储在 `~/.mini-code/config.toml`：
 
 ```toml
 [api]
@@ -127,35 +127,35 @@ auto_save = true
 theme = "dark"
 ```
 
-On first launch without a config file, interactively guide the user through creation.
+首次启动如果没有配置文件，交互式引导用户创建。
 
-## Error Handling
+## 错误处理
 
-| Scenario | Handling |
-|----------|----------|
-| API call failure (network/timeout) | Retry 2 times, then return error to model |
-| Tool execution failure (file not found, permission denied) | Return error as tool_result, let model decide next step |
-| `search_replace` old_string mismatch | Return specific error ("matching content not found"), model typically retries |
-| User cancels bash/write confirmation | Return "user cancelled operation" to model |
-| Corrupted session file | Detect on startup, prompt user to recover or delete |
+| 场景 | 处理方式 |
+|------|----------|
+| API 调用失败（网络/超时） | 重试 2 次，仍失败则返回错误给模型 |
+| 工具执行失败（文件不存在、权限不足） | 将错误作为 tool_result 回传，让模型决定下一步 |
+| `search_replace` old_string 不匹配 | 返回具体错误（"未找到匹配内容"），模型通常重试 |
+| 用户取消 bash/写入确认 | 回传 "用户取消了操作" 给模型 |
+| 会话文件损坏 | 启动时检测，提示用户恢复或删除 |
 
-All errors are surfaced as text in the message history; the REPL never crashes.
+所有错误最终都表现为消息历史中的文本，REPL 永不崩溃。
 
-## Testing Strategy
+## 测试策略
 
-### Unit Tests
-- `tools/`: Each tool tested independently using temp directories and mock commands
-- `session.rs`: Session CRUD, serialization/deserialization
-- `config.rs`: Config read/write, defaults
-- `message_history.rs`: Message format conversion (internal format <-> Anthropic API format)
+### 单元测试
+- `tools/`：每个工具独立测试，使用临时目录和 mock 命令
+- `session.rs`：测试会话 CRUD、序列化/反序列化
+- `config.rs`：测试配置读写、默认值
+- `message_history.rs`：测试消息格式转换（内部格式 ↔ Anthropic API 格式）
 
-### Integration Tests
-- `anthropic.rs`: Use `mockito` or `wiremock` to simulate Anthropic API, test complete tool use loop
-  - Scenario: user request -> API returns tool_use -> execute tool -> return result -> API returns final response
+### 集成测试
+- `anthropic.rs`：使用 `mockito` 或 `wiremock` 模拟 Anthropic API，测试完整 tool use 循环
+  - 场景：用户请求 → API 返回 tool_use → 执行工具 → 回传结果 → API 返回最终回复
 
-### End-to-End Tests
-- Optional for mini project due to maintenance overhead
+### 端到端测试
+- 对于 mini 项目可选，维护成本较高
 
-### Out of Scope
-- Real Anthropic API calls (costly, unstable)
-- Color output testing
+### 不测试的内容
+- 真实的 Anthropic API 调用（成本高、不稳定）
+- 颜色输出测试
